@@ -412,42 +412,61 @@ static int save_sdoft_cache(sd_dictfile_index *index, const char *sdoft_path) {
         return -1;
     }
 
-    FILE *fp = fopen(sdoft_path, "wb");
-    if (!fp) {
-        fprintf(stderr, "Warning: Cannot create .sdoft cache file: %s\n", sdoft_path);
+    // Keep the temporary file beside the cache so rename atomically replaces
+    // the old complete cache only after this new one has been fully written.
+    size_t temporary_length = strlen(sdoft_path) + sizeof(".tmp.XXXXXX");
+    char *temporary_path = malloc(temporary_length);
+    if (!temporary_path) {
         return -1;
     }
+    snprintf(temporary_path, temporary_length, "%s.tmp.XXXXXX", sdoft_path);
+
+    int fd = mkstemp(temporary_path);
+    if (fd < 0) {
+        fprintf(stderr, "Warning: Cannot create temporary .sdoft cache file\n");
+        free(temporary_path);
+        return -1;
+    }
+    FILE *fp = fdopen(fd, "wb");
+    if (!fp) {
+        sd_close(fd);
+        unlink(temporary_path);
+        free(temporary_path);
+        return -1;
+    }
+
+    // Every record write has the same failure cleanup. Keep it centralized so
+    // no branch forgets to close the stream or remove the incomplete cache.
+#define SDOFT_WRITE_FAILED(message) do { \
+    fprintf(stderr, "Warning: %s\n", (message)); \
+    fclose(fp); \
+    unlink(temporary_path); \
+    free(temporary_path); \
+    return -1; \
+} while (0)
 
     // 1. Write header (16 bytes)
     // Magic: "SDOFT\0" (6 bytes)
     if (fwrite(SDOFT_MAGIC, 1, 6, fp) != 6) {
-        fprintf(stderr, "Warning: Failed to write .sdoft magic\n");
-        fclose(fp);
-        return -1;
+        SDOFT_WRITE_FAILED("Failed to write .sdoft magic");
     }
 
     // Reserved: 2 bytes (alignment)
     uint16_t reserved = 0;
     if (fwrite(&reserved, 1, sizeof(uint16_t), fp) != sizeof(uint16_t)) {
-        fprintf(stderr, "Warning: Failed to write .sdoft reserved\n");
-        fclose(fp);
-        return -1;
+        SDOFT_WRITE_FAILED("Failed to write .sdoft reserved");
     }
 
     // Version: 4 bytes
     uint32_t version = SDOFT_VERSION;
     if (fwrite(&version, 1, sizeof(uint32_t), fp) != sizeof(uint32_t)) {
-        fprintf(stderr, "Warning: Failed to write .sdoft version\n");
-        fclose(fp);
-        return -1;
+        SDOFT_WRITE_FAILED("Failed to write .sdoft version");
     }
 
     // wordcount: 4 bytes
     uint32_t wordcount = index->wordcount;
     if (fwrite(&wordcount, 1, sizeof(uint32_t), fp) != sizeof(uint32_t)) {
-        fprintf(stderr, "Warning: Failed to write .sdoft wordcount\n");
-        fclose(fp);
-        return -1;
+        SDOFT_WRITE_FAILED("Failed to write .sdoft wordcount");
     }
 
     // 2. Write page info array
@@ -456,26 +475,20 @@ static int save_sdoft_cache(sd_dictfile_index *index, const char *sdoft_path) {
 
         // Write offset
         if (fwrite(&page->offset, sizeof(uint32_t), 1, fp) != 1) {
-            fprintf(stderr, "Warning: Failed to write .sdoft page offset\n");
-            fclose(fp);
-            return -1;
+            SDOFT_WRITE_FAILED("Failed to write .sdoft page offset");
         }
 
         // Write first word (NUL-terminated)
         if (page->first_word) {
             size_t len = strlen(page->first_word) + 1;
             if (fwrite(page->first_word, 1, len, fp) != len) {
-                fprintf(stderr, "Warning: Failed to write .sdoft first_word\n");
-                fclose(fp);
-                return -1;
+                SDOFT_WRITE_FAILED("Failed to write .sdoft first_word");
             }
         } else {
             // Write empty string as terminator
             char null_term = '\0';
             if (fwrite(&null_term, 1, 1, fp) != 1) {
-                fprintf(stderr, "Warning: Failed to write .sdoft null terminator\n");
-                fclose(fp);
-                return -1;
+                SDOFT_WRITE_FAILED("Failed to write .sdoft null terminator");
             }
         }
 
@@ -483,54 +496,56 @@ static int save_sdoft_cache(sd_dictfile_index *index, const char *sdoft_path) {
         if (page->last_word) {
             size_t len = strlen(page->last_word) + 1;
             if (fwrite(page->last_word, 1, len, fp) != len) {
-                fprintf(stderr, "Warning: Failed to write .sdoft last_word\n");
-                fclose(fp);
-                return -1;
+                SDOFT_WRITE_FAILED("Failed to write .sdoft last_word");
             }
         } else {
             // Write empty string as terminator
             char null_term = '\0';
             if (fwrite(&null_term, 1, 1, fp) != 1) {
-                fprintf(stderr, "Warning: Failed to write .sdoft null terminator\n");
-                fclose(fp);
-                return -1;
+                SDOFT_WRITE_FAILED("Failed to write .sdoft null terminator");
             }
         }
     }
 
     // 3. Write end_offset
     if (fwrite(&index->end_offset, sizeof(uint32_t), 1, fp) != 1) {
-        fprintf(stderr, "Warning: Failed to write .sdoft end_offset\n");
-        fclose(fp);
-        return -1;
+        SDOFT_WRITE_FAILED("Failed to write .sdoft end_offset");
     }
 
     // 4. Write metadata string (optional)
     const char *metadata_template = "url=%s\n";
     int metadata_len = snprintf(NULL, 0, metadata_template, index->idx_path);
     if (metadata_len < 0) {
-        fprintf(stderr, "Warning: Failed to calculate metadata length\n");
-        fclose(fp);
-        return -1;
+        SDOFT_WRITE_FAILED("Failed to calculate metadata length");
     }
 
     char *metadata = malloc((size_t)metadata_len + 1);
     if (!metadata) {
-        fprintf(stderr, "Warning: Failed to allocate metadata buffer\n");
-        fclose(fp);
-        return -1;
+        SDOFT_WRITE_FAILED("Failed to allocate metadata buffer");
     }
 
     snprintf(metadata, (size_t)metadata_len + 1, metadata_template, index->idx_path);
     if (fwrite(metadata, 1, (size_t)metadata_len + 1, fp) != (size_t)metadata_len + 1) {
-        fprintf(stderr, "Warning: Failed to write .sdoft metadata\n");
         free(metadata);
-        fclose(fp);
-        return -1;
+        SDOFT_WRITE_FAILED("Failed to write .sdoft metadata");
     }
 
     free(metadata);
-    fclose(fp);
+    int flush_result = fflush(fp);
+    int sync_result = flush_result == 0 ? fsync(fd) : -1;
+    int close_result = fclose(fp);
+    if (flush_result != 0 || sync_result != 0 || close_result != 0) {
+        unlink(temporary_path);
+        free(temporary_path);
+        return -1;
+    }
+    if (rename(temporary_path, sdoft_path) != 0) {
+        unlink(temporary_path);
+        free(temporary_path);
+        return -1;
+    }
+    free(temporary_path);
+#undef SDOFT_WRITE_FAILED
     return 0;
 }
 
@@ -1434,16 +1449,19 @@ int sd_dictfile_index_get_data_info(sd_dictfile_index *index, uint32_t idx,
     return 0;
 }
 
-void sd_dictfile_index_entries_sorted_insert(sd_array(sd_dictfile_index_entry) entries,
+void sd_dictfile_index_entries_sorted_insert(sd_array(sd_dictfile_index_entry) *entries_ptr,
                                     const sd_dictfile_index_entry *entry) {
-    if (!entries || !entry) {
+    if (!entries_ptr || !entry) {
         return;
     }
+
+    sd_array(sd_dictfile_index_entry) entries = *entries_ptr;
 
     size_t size = sd_array_size(entries);
     if (size == 0) {
         // Empty array, add directly
         sd_array_push_back(entries, *entry);
+        *entries_ptr = entries;
         return;
     }
 
@@ -1475,4 +1493,5 @@ void sd_dictfile_index_entries_sorted_insert(sd_array(sd_dictfile_index_entry) e
 
     // Insert at low position
     sd_array_insert(entries, low, *entry);
+    *entries_ptr = entries;
 }

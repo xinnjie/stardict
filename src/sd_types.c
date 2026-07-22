@@ -19,6 +19,7 @@ const char *sd_strerror(sd_status status) {
         case SD_ERR_MEMORY:        return "out of memory";
         case SD_ERR_FORMAT:        return "format error";
         case SD_ERR_INTERNAL:      return "internal error";
+        case SD_ERR_STATE:         return "invalid state";
         default:                   return "unknown error";
     }
 }

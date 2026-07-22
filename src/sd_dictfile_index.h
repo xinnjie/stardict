@@ -130,12 +130,14 @@ int sd_dictfile_index_get_data_info(sd_dictfile_index *index, uint32_t idx,
 
 /**
  * Insert entry into sorted cvector in order
- * @param entries cvector array (must already be sorted by word+offset)
+ * @param entries Pointer to a cvector array (must already be sorted by word+offset).
+ *                Insertion may reallocate the array, so the updated pointer is
+ *                returned through this parameter.
  * @param entry Entry to insert
  * @note Sort order: compare word first, then offset if equal.
  *       If both word and offset are equal, insert after (stable).
  */
-void sd_dictfile_index_entries_sorted_insert(sd_array(sd_dictfile_index_entry) entries,
+void sd_dictfile_index_entries_sorted_insert(sd_array(sd_dictfile_index_entry) *entries,
                                        const sd_dictfile_index_entry *entry);
 
 #ifdef __cplusplus
