@@ -451,6 +451,90 @@ sd_stardict_paths sd_stardict_get_paths(sd_stardict *stardict) {
     return paths;
 }
 
+sd_status sd_stardict_load_query_data(sd_stardict *stardict) {
+    if (!stardict) {
+        return SD_ERR_INVALID_PARAM;
+    }
+    if (stardict->idx) {
+        return SD_OK;
+    }
+    if (!stardict->ifo || !stardict->ifo_path) {
+        return SD_ERR_STATE;
+    }
+
+    char *idx_gz_path = replace_extension(stardict->ifo_path, ".idx.gz");
+    char *idx_path = replace_extension(stardict->ifo_path, ".idx");
+    char *syn_path = replace_extension(stardict->ifo_path, ".syn");
+    if (!idx_gz_path || !idx_path || !syn_path) {
+        free(idx_gz_path);
+        free(idx_path);
+        free(syn_path);
+        return SD_ERR_MEMORY;
+    }
+
+    const char *actual_idx_path = NULL;
+    if (file_exists(idx_gz_path)) {
+        actual_idx_path = idx_gz_path;
+    } else if (file_exists(idx_path)) {
+        actual_idx_path = idx_path;
+    } else {
+        free(idx_gz_path);
+        free(idx_path);
+        free(syn_path);
+        return SD_ERR_IO;
+    }
+
+    sd_dictfile_index *new_idx = sd_dictfile_index_open(
+        actual_idx_path,
+        stardict_parse_entry,
+        stardict->ifo->wordcount,
+        stardict->ifo->index_file_size
+    );
+    if (!new_idx) {
+        free(idx_gz_path);
+        free(idx_path);
+        free(syn_path);
+        return SD_ERR_FORMAT;
+    }
+
+    char *new_idx_path = strdup(actual_idx_path);
+    if (!new_idx_path) {
+        sd_dictfile_index_close(new_idx);
+        free(idx_gz_path);
+        free(idx_path);
+        free(syn_path);
+        return SD_ERR_MEMORY;
+    }
+
+    sd_stardict_syn *new_syn = NULL;
+    char *new_syn_path = NULL;
+    if (file_exists(syn_path)) {
+        new_syn = sd_stardict_syn_load(syn_path, stardict->ifo->syn_wordcount);
+        if (new_syn) {
+            new_syn_path = strdup(syn_path);
+            if (!new_syn_path) {
+                sd_stardict_syn_free(new_syn);
+                sd_dictfile_index_close(new_idx);
+                free(new_idx_path);
+                free(idx_gz_path);
+                free(idx_path);
+                free(syn_path);
+                return SD_ERR_MEMORY;
+            }
+        }
+    }
+
+    stardict->idx = new_idx;
+    stardict->idx_path = new_idx_path;
+    stardict->syn = new_syn;
+    stardict->syn_path = new_syn_path;
+
+    free(idx_gz_path);
+    free(idx_path);
+    free(syn_path);
+    return SD_OK;
+}
+
 // ============================================================
 // Constructor (public API)
 // ============================================================
