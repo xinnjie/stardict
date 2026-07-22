@@ -243,7 +243,7 @@ sd_status stardict_entry_lookup(sd_stardict *stardict, const char *key, sd_index
                     if (entry_copy.word) {
                         entry_copy.offset = entry->offset;
                         entry_copy.size = entry->size;
-                        sd_dictfile_index_entries_sorted_insert(all_entries, &entry_copy);
+                        sd_dictfile_index_entries_sorted_insert(&all_entries, &entry_copy);
                     }
                 }
             }
@@ -273,13 +273,16 @@ sd_status stardict_entry_lookup(sd_stardict *stardict, const char *key, sd_index
 
     for (size_t i = 0; i < count; i++) {
         sd_dictfile_index_entry *index_entry = calloc(1, sizeof(sd_dictfile_index_entry));
-        if (index_entry) {
-            index_entry->word = all_entries[i].word;
-            all_entries[i].word = NULL;
-            index_entry->offset = all_entries[i].offset;
-            index_entry->size = all_entries[i].size;
-            index_entries->items[i] = index_entry;
+        if (!index_entry) {
+            sd_index_entry_array_free(index_entries);
+            sd_dictfile_index_free_entries(all_entries);
+            return SD_ERR_MEMORY;
         }
+        index_entry->word = all_entries[i].word;
+        all_entries[i].word = NULL;
+        index_entry->offset = all_entries[i].offset;
+        index_entry->size = all_entries[i].size;
+        index_entries->items[i] = index_entry;
     }
 
     sd_dictfile_index_free_entries(all_entries);
@@ -322,16 +325,24 @@ sd_status stardict_lookup(sd_stardict *stardict, const char *key, sd_data_entry_
 
     for (size_t i = 0; i < index_results->count; i++) {
         sd_dictfile_index_entry *entry = index_results->items[i];
+        if (!entry || !entry->word) {
+            sd_data_entry_array_free(results);
+            sd_index_entry_array_free(index_results);
+            return SD_ERR_INTERNAL;
+        }
         results->items[i].word = entry->word;
         entry->word = NULL;
 
         sd_dictfile_data_block *block = sd_dictfile_read(stardict->dict,
                                                                entry->offset,
                                                                entry->size);
-        if (block) {
-            sd_dictfile_data_to_string(stardict->dict,
-                                            block->data, block->size,
-                                            &results->items[i].definition);
+        if (!block || sd_dictfile_data_to_string(stardict->dict,
+                                                  block->data, block->size,
+                                                  &results->items[i].definition) != 0 ||
+            !results->items[i].definition) {
+            sd_data_entry_array_free(results);
+            sd_index_entry_array_free(index_results);
+            return SD_ERR_IO;
         }
     }
 
@@ -379,15 +390,16 @@ sd_status stardict_suggest(sd_stardict *stardict, const char *prefix, size_t lim
 
     for (size_t i = 0; i < count; i++) {
         sd_dictfile_index_entry *index_entry = calloc(1, sizeof(sd_dictfile_index_entry));
-        if (index_entry) {
-            index_entry->word = entries[i].word;  // Transfer ownership
-            index_entry->offset = entries[i].offset;
-            index_entry->size = entries[i].size;
-
-            suggestions->items[i] = index_entry;
-
-            entries[i].word = NULL;  // Prevent double free
+        if (!index_entry) {
+            sd_index_entry_array_free(suggestions);
+            sd_dictfile_index_free_entries(entries);
+            return SD_ERR_MEMORY;
         }
+        index_entry->word = entries[i].word;  // Transfer ownership
+        index_entry->offset = entries[i].offset;
+        index_entry->size = entries[i].size;
+        suggestions->items[i] = index_entry;
+        entries[i].word = NULL;  // Prevent double free
     }
 
     sd_dictfile_index_free_entries(entries);
