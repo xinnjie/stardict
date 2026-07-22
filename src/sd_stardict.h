@@ -36,6 +36,12 @@ typedef struct sd_stardict sd_stardict;
 sd_status sd_stardict_open(const char *ifo_path, bool data_only, sd_stardict **out_dict);
 
 /**
+ * Load the index and optional synonym data for a data-only dictionary.
+ * This operation is idempotent and leaves the dictionary unchanged on failure.
+ */
+sd_status sd_stardict_load_query_data(sd_stardict *stardict);
+
+/**
  * Close StarDict dictionary
  * @param stardict StarDict dictionary object
  */
