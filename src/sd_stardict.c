@@ -46,7 +46,7 @@ struct sd_stardict {
  */
 static size_t stardict_parse_entry(const char *data, size_t data_size,
                                   sd_dictfile_index_entry *entry) {
-    if (!data || !entry || data_size < 5) {
+    if (!data || !entry || data_size < 9) {
         return 0;  // At least need '\0' + 4-byte offset + 4-byte size
     }
 
@@ -55,11 +55,16 @@ static size_t stardict_parse_entry(const char *data, size_t data_size,
 
     // Parse word (NUL-terminated)
     size_t word_len = strnlen(p, end - p);
-    if (word_len == 0 || p + word_len >= end) {
+    // Empty headwords occur in real dictionaries such as FOLDOC. They are
+    // representable by the format and must still consume a complete entry.
+    if (p + word_len >= end) {
         return 0;  // Invalid data
     }
 
     entry->word = strndup(p, word_len);
+    if (!entry->word) {
+        return 0;
+    }
     p += word_len + 1;  // Skip word and '\0'
 
     // Check remaining space

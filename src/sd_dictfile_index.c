@@ -552,6 +552,28 @@ static int save_sdoft_cache(sd_dictfile_index *index, const char *sdoft_path) {
 /**
  * Load page info from .sdoft cache file (libud custom format)
  */
+static int read_sdoft_word(const char **cursor, const char *end, char **word) {
+    if (!cursor || !*cursor || !word || *cursor >= end) {
+        return -1;
+    }
+
+    size_t remaining = (size_t)(end - *cursor);
+    const char *terminator = memchr(*cursor, '\0', remaining);
+    if (!terminator) {
+        return -1;
+    }
+
+    size_t length = (size_t)(terminator - *cursor);
+    char *copy = malloc(length + 1);
+    if (!copy) {
+        return -1;
+    }
+    memcpy(copy, *cursor, length + 1);
+    *word = copy;
+    *cursor = terminator + 1;
+    return 0;
+}
+
 static int load_sdoft_cache(sd_dictfile_index *index, const char *sdoft_path) {
     if (!index || !sdoft_path) {
         return -1;
@@ -651,7 +673,7 @@ static int load_sdoft_cache(sd_dictfile_index *index, const char *sdoft_path) {
 
     // 3. Read Page Info Array
     for (uint32_t i = 0; i < page_count; i++) {
-        sd_dictfile_index_sdoft_page page;
+        sd_dictfile_index_sdoft_page page = {0};
 
         // Check if enough data to read offset
         if (end - p < (int)sizeof(uint32_t)) {
@@ -663,41 +685,19 @@ static int load_sdoft_cache(sd_dictfile_index *index, const char *sdoft_path) {
         memcpy(&page.offset, p, sizeof(uint32_t));
         p += 4;
 
-        // Read first word (NUL-terminated)
-        size_t len = strlen(p);
-        if (p + len >= end) {
+        // Empty page-boundary words are valid and must remain allocated empty
+        // strings: page comparisons require non-NULL string pointers.
+        if (read_sdoft_word(&p, end, &page.first_word) != 0) {
             fprintf(stderr, "Warning: Failed to read .sdoft first_word\n");
             goto error;
         }
-        if (len > 0) {
-            page.first_word = malloc(len + 1);
-            if (!page.first_word) {
-                fprintf(stderr, "Error: Memory allocation failed for first_word\n");
-                goto error;
-            }
-            memcpy(page.first_word, p, len + 1);  // +1 copy NUL
-        } else {
-            page.first_word = NULL;
-        }
-        p += len + 1;  // Skip string and NUL
 
         // Read last word (NUL-terminated)
-        len = strlen(p);
-        if (p + len >= end) {
+        if (read_sdoft_word(&p, end, &page.last_word) != 0) {
             fprintf(stderr, "Warning: Failed to read .sdoft last_word\n");
+            free(page.first_word);
             goto error;
         }
-        if (len > 0) {
-            page.last_word = malloc(len + 1);
-            if (!page.last_word) {
-                fprintf(stderr, "Error: Memory allocation failed for last_word\n");
-                goto error;
-            }
-            memcpy(page.last_word, p, len + 1);  // +1 copy NUL
-        } else {
-            page.last_word = NULL;
-        }
-        p += len + 1;  // Skip string and NUL
 
         // Add to cvector
         sd_array_push_back(index->pages, page);
