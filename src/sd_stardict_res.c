@@ -578,8 +578,9 @@ sd_stardict_res *sd_stardict_res_store_load(const char *dirname) {
         return store;
     }
 
-    // Both modes failed
-    fprintf(stderr, "Warning: No resource storage found in %s\n", dirname);
+    // Resource storage is optional. The common case where neither res.rifo nor
+    // res/ exists is not an error; the loaders above already report failures
+    // when storage is present but malformed or unreadable.
     sd_stardict_res_store_free(store);
     return NULL;
 }
