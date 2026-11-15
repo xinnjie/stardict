@@ -1,3 +1,0 @@
-[submodule "deps/dictzip"]
-	path = deps/dictzip
-	url = https://github.com/unidict/dictzip.git

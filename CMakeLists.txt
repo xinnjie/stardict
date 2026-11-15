@@ -11,7 +11,7 @@ option(BUILD_SHARED_LIBS "Build shared library" OFF)
 # ---------- Dependencies ----------
 find_package(ZLIB REQUIRED)
 
-# ---------- dictzip submodule ----------
+# ---------- dictzip ----------
 set(DICTZIP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 if(NOT TARGET dictzip)
     add_subdirectory(deps/dictzip)

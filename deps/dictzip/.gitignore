@@ -1,0 +1,7 @@
+xcuserdata/
+.claude/
+
+# CMake
+build/
+cmake-build-*/
+CMakeUserPresets.json
